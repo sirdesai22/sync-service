@@ -5,14 +5,7 @@ A Go-based sync service that keeps PostgreSQL as the source of truth in sync wit
 ---
 
 ## Architecture Overview
-
-```
-Postgres ──► Outbox table ──► Sync worker ──► Elasticsearch
-                │                     │
-                │                     └─► DLQ table (on failure)
-                │
-                └─► Admin API  ──► React dashboard / Prometheus
-```
+![Architecture Diagram](image.png)
 
 ### Key Components
 

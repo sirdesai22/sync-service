@@ -79,11 +79,11 @@ func main() {
 	mux.HandleFunc("/api/dlq", func(w http.ResponseWriter, r *http.Request) {
 		var dlq []models.DLQ
 		if err := pg.Order("id desc").Limit(100).Find(&dlq).Error; err != nil {
-			log.Printf("DLQ query failed: %v", err)
+			// log.Printf("DLQ query failed: %v", err)
 			http.Error(w, "query failed", http.StatusInternalServerError)
 			return
 		}
-		log.Printf("DLQ query returned %d rows", len(dlq))
+		// log.Printf("DLQ query returned %d rows", len(dlq))
 		json.NewEncoder(w).Encode(dlq)
 	})
 	mux.HandleFunc("/api/retry/", func(rw http.ResponseWriter, r *http.Request) {
