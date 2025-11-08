@@ -13,6 +13,7 @@ func Migrate(db *gorm.DB) {
 		&models.Hackathon{},
 		&models.Project{},
 		&models.Outbox{},
+		&models.DLQ{},
 	)
 	if err != nil {
 		log.Fatalf("❌ migration failed: %v", err)
