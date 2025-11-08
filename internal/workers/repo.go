@@ -5,11 +5,15 @@ package workers
 import (
 	"context"
 	"log"
+	"os"
 	"time"
-	"gorm.io/gorm"
-	"github.com/sirdesai22/sync-service/internal/models"
+
 	"github.com/sirdesai22/sync-service/internal/metrics"
+	"github.com/sirdesai22/sync-service/internal/models"
+	"gorm.io/gorm"
 )
+
+var dlqLogger = log.New(os.Stdout, "[DLQ] ", log.LstdFlags)
 
 type OutboxBatch struct{ Events []models.Outbox }
 
@@ -33,20 +37,21 @@ func FetchOutboxBatch(ctx context.Context, db *gorm.DB, limit int) (OutboxBatch,
 
 // PutDLQ inserts a failed outbox event into the DLQ table.
 func PutDLQ(db *gorm.DB, ob models.Outbox, msg string) {
-    metrics.DLQEvents.Inc()
-    dlq := models.DLQ{
-        OutboxID:   ob.ID,
-        EntityType: ob.EntityType,
-        EntityID:   ob.EntityID.String(),
-        Op:         ob.Op,
-        ErrorMsg:   msg,
-        Payload:    ob.Payload,
-        CreatedAt:  time.Now(),
-        Resolved:   false,
-    }
-    if err := db.Create(&dlq).Error; err != nil {
-        log.Printf("❌ Failed to insert into DLQ: %v", err)
-    } else {
-        log.Printf("💀 DLQ record created for outbox_id=%d", ob.ID)
-    }
+	metrics.DLQEvents.Inc()
+	dlq := models.DLQ{
+		OutboxID:   ob.ID,
+		EntityType: ob.EntityType,
+		EntityID:   ob.EntityID.String(),
+		Op:         ob.Op,
+		ErrorMsg:   msg,
+		Payload:    ob.Payload,
+		CreatedAt:  time.Now(),
+		Resolved:   false,
+	}
+	dlqLogger.Printf("adding to DLQ outbox_id=%d entity=%s op=%s reason=%s", ob.ID, ob.EntityType, ob.Op, msg)
+	if err := db.Create(&dlq).Error; err != nil {
+		dlqLogger.Printf("failed to insert into DLQ outbox_id=%d: %v", ob.ID, err)
+	} else {
+		dlqLogger.Printf("record created for outbox_id=%d entity=%s", ob.ID, ob.EntityType)
+	}
 }

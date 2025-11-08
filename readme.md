@@ -1,52 +1,120 @@
-## **Problem Statement**
+## Sync Service
 
-You're building a sync service for a developer platform that hosts hackathons and project submissions.
+A Go-based sync service that keeps PostgreSQL as the source of truth in sync with Elasticsearch, complete with observability, a DLQ (dead-letter queue) workflow, and a lightweight dashboard for manual operations.
 
-## **Challenge**
+---
 
-The platform uses **Postgres as the source of truth** for all data, but relies on **Elasticsearch for search functionality**. When data changes in Postgres, those changes must be reflected in Elasticsearch. Your task is to design and build a system that keeps both datastores in sync.
+## Architecture Overview
 
-## **Data**
+```
+Postgres ──► Outbox table ──► Sync worker ──► Elasticsearch
+                │                     │
+                │                     └─► DLQ table (on failure)
+                │
+                └─► Admin API  ──► React dashboard / Prometheus
+```
 
-Your system needs to handle three main entities:
+### Key Components
 
-- **Users** - Developer profiles (username, email, skills, college, etc.)
-- **Hackathons** - Coding events (name, dates, location, tracks, etc.)
-- **Projects** - Hackathon submissions (name, description, team members, hackathon, etc.)
+- **Outbox pattern** (`internal/services`): database mutations enqueue events in `outboxes`.
+- **Sync worker** (`internal/workers/sync_worker.go`): polls unprocessed events and indexes documents into Elasticsearch.
+- **Dead-letter queue** (`internal/models/dlq.go`): records that failed to sync for manual inspection and retry.
+- **Admin API** (`cmd/server/main.go`): exposes metrics, latest outbox rows, DLQ items, and helper actions.
+- **Metrics** (`internal/metrics`): Prometheus counters for processed, failed, and DLQ events.
+- **Dashboard** (`sync-dashboard/`): React + SWR app that consumes the Admin API for monitoring and manual operations.
 
-These entities have relationships:
+Automatic DLQ retries are disabled by default; retries are triggered manually through the Admin API or dashboard.
 
-- Users participate in Hackathons
-- Projects belong to Hackathons and are created by Users
-- Think about how changes cascade (e.g., what happens when a user updates their profile?)
+---
 
-You can choose to construct the data model for this, however you see most appropriate.
+## Getting Started
 
-## **Core Requirements**
+### Requirements
 
-1. **Capture database changes** - Detect when records are created, updated, or deleted in Postgres
+- Go 1.25+
+- Node.js 20+ (for the dashboard)
+- Docker & Docker Compose (for PostgreSQL and Elasticsearch)
 
-2. **Sync to Elasticsearch** - Apply those changes to corresponding Elasticsearch indexes
+### 1. Start infrastructure
 
-3. **Handle failures gracefully** - Network issues, Elasticsearch downtime, malformed data
+```bash
+docker compose up -d
+```
 
-4. **Maintain data consistency** - Ensure Elasticsearch accurately reflects Postgres state
+This launches:
 
-5. **Provide visibility** - Some way to monitor sync health and debug issues
+- PostgreSQL (`postgres://dev:dev@localhost:5431/syncdb`)
+- Elasticsearch on `localhost:9200`
+- Kibana on `localhost:5601`
 
-## **Questions to Consider**
+### 2. Configure environment
 
-- How will you capture changes from Postgres?
-- What happens if Elasticsearch is temporarily unavailable?
-- How do you ensure changes are applied in the correct order?
-- How would you recover from a complete Elasticsearch data loss?
-- What are the trade-offs in your design?
+Create a `.env` file or export the DSN before running the server:
 
-## **Tech Stack Reference**
+```bash
+export POSTGRES_DSN="host=localhost port=5431 user=dev password=dev dbname=syncdb sslmode=disable"
+```
 
-We use:
+### 3. Run the sync service
 
-- **Language:** Go
-- **Database:** Postgres with GORM
-- **Search:** Elasticsearch
-- **Architecture:** HTTP API with CRON-triggered sync jobs
+```bash
+go run ./cmd/server
+```
+
+On boot the service:
+
+- Connects to Postgres & Elasticsearch
+- Runs migrations (`internal/db/migrate.go`)
+- Seeds sample data if the database is empty
+- Starts the background sync worker
+- Exposes the Admin API on `:8080`
+
+### 4. (Optional) Launch the dashboard
+
+```bash
+cd sync-dashboard
+npm install
+npm run dev
+```
+
+Visit `http://localhost:5173` to view outbox & DLQ tables and trigger helper actions.
+
+---
+
+## Admin API
+
+| Endpoint | Description |
+| --- | --- |
+| `GET /metrics` | Prometheus metrics (`sync_processed_total`, `sync_failed_total`, `sync_dlq_total`) |
+| `GET /api/outbox` | Latest 100 outbox events (ordered by `id desc`) |
+| `GET /api/dlq` | Latest 100 DLQ entries |
+| `GET /api/retry/{id}` | Manually retry a DLQ row (re-runs the event through the worker) |
+| `POST /api/add-user` | Creates a demo user and enqueues an outbox event |
+| `POST /api/update-user` | Updates a random user, demonstrating cascading outbox writes |
+
+> **Note:** `/api/retry/{id}` reuses the standard worker logic; if the retry fails again it will remain unresolved in the DLQ.
+
+---
+
+## Operational Notes
+
+- **Manual DLQ handling:** Automatic retry loops are intentionally disabled (`RetryDLQ` is not started). Use `/api/retry/{id}` or the dashboard button to retry failed events.
+- **Bulk indexer lifecycle:** The sync worker keeps a single bulk indexer instance alive for the lifetime of the worker, ensuring efficient flush behaviour.
+- **Prometheus/Kibana:** Exposed ports (`:8080`, `:9200`, `:5601`) make it easy to plug in monitoring tools or view indexed documents.
+- **Seeding:** Initial sample data (user, hackathon, project) is inserted only when the database is empty.
+
+---
+
+## Project Structure
+
+```
+cmd/server/         # main entrypoint & admin API
+internal/db/        # connection, migrations, seed data
+internal/services/  # domain operations (outbox writes, user updates)
+internal/workers/   # sync worker, DLQ repo & retry helpers
+internal/elastic/   # client setup & document builders
+internal/metrics/   # Prometheus instrumentation
+sync-dashboard/     # React dashboard for monitoring/manual actions
+```
+
+---

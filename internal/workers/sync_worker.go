@@ -8,7 +8,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/google/uuid"
+	// "github.com/google/uuid"
 	es "github.com/elastic/go-elasticsearch/v8"
 	"github.com/elastic/go-elasticsearch/v8/esutil"
 	"github.com/sirdesai22/sync-service/internal/elastic"
@@ -23,25 +23,38 @@ type SyncWorker struct {
 }
 
 func (w *SyncWorker) Run(ctx context.Context) {
-	if err := elastic.EnsureIndexes(ctx, w.ES); err != nil {
-		log.Fatalf("ensure indexes: %v", err)
+	bi, err := esutil.NewBulkIndexer(esutil.BulkIndexerConfig{
+		Client:        w.ES,
+		NumWorkers:    1,
+		FlushInterval: 2 * time.Second,
+	})
+	if err != nil {
+		log.Fatalf("Bulk indexer init failed: %v", err)
 	}
-	ticker := time.NewTicker(1 * time.Second)
+
+	// ✅ Close only once, when the worker exits — not after every batch
+	defer func() {
+		log.Println("Closing BulkIndexer …")
+		if err := bi.Close(ctx); err != nil {
+			log.Printf("BulkIndexer close error: %v", err)
+		}
+	}()
+
+	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
+			log.Println("Sync worker shutting down")
 			return
 		case <-ticker.C:
-			if err := w.processOnce(ctx); err != nil {
-				log.Printf("worker error: %v", err)
-			}
+			w.processOnce(ctx, bi) // pass the same BulkIndexer each tick
 		}
 	}
 }
 
-func (w *SyncWorker) processOnce(ctx context.Context) error {
+func (w *SyncWorker) processOnce(ctx context.Context, bi esutil.BulkIndexer) error {
 	batch, err := FetchOutboxBatch(ctx, w.DB, 200)
 	if err != nil {
 		return err
@@ -49,10 +62,6 @@ func (w *SyncWorker) processOnce(ctx context.Context) error {
 	if len(batch.Events) == 0 {
 		return nil
 	}
-
-	bi, _ := esutil.NewBulkIndexer(esutil.BulkIndexerConfig{
-		Client: w.ES, Index: "", FlushBytes: 5 << 20, NumWorkers: 2,
-	})
 
 	for _, e := range batch.Events {
 		if err := w.applyEvent(ctx, bi, e); err != nil {
@@ -65,9 +74,6 @@ func (w *SyncWorker) processOnce(ctx context.Context) error {
 		metrics.ProcessedEvents.Inc()
 	}
 
-	if err := bi.Close(ctx); err != nil {
-		return err
-	}
 	stats := bi.Stats()
 	log.Printf("bulk ok=%d failed=%d", stats.NumFlushed, stats.NumFailed)
 	return nil
@@ -127,39 +133,42 @@ func (w *SyncWorker) applyEvent(ctx context.Context, bi esutil.BulkIndexer, e mo
 func (w *SyncWorker) add(bi esutil.BulkIndexer, index, docID string, outboxID int64, action string, body []byte) error {
 	item := esutil.BulkIndexerItem{
 		Action:     action,
-		DocumentID: docID,
 		Index:      index,
-		Body:       nil,
-		OnSuccess: func(ctx context.Context, item esutil.BulkIndexerItem, res esutil.BulkIndexerResponseItem) {
+		DocumentID: docID,
+		Body:       bytes.NewReader(body),
+		OnSuccess: func(_ context.Context, _ esutil.BulkIndexerItem, _ esutil.BulkIndexerResponseItem) {
 			log.Printf("✅ synced %s id=%s", index, docID)
 		},
-		OnFailure: func(ctx context.Context, item esutil.BulkIndexerItem, res esutil.BulkIndexerResponseItem, err error) {
+		OnFailure: func(_ context.Context, it esutil.BulkIndexerItem, res esutil.BulkIndexerResponseItem, err error) {
+			log.Printf("💀 OnFailure fired for %s/%s", it.Index, it.DocumentID)
+
 			msg := ""
-			switch {
-			case err != nil:
+			if err != nil {
 				msg = err.Error()
-			case res.Error.Reason != "":
+			} else if res.Error.Reason != "" {
 				msg = fmt.Sprintf("%s: %s", res.Error.Type, res.Error.Reason)
-			default:
-				msg = fmt.Sprintf("status=%d failed to index", res.Status)
+			} else {
+				msg = fmt.Sprintf("status=%d", res.Status)
 			}
 
-			// ✅ Write failed event to DLQ
-			ob := models.Outbox{
-				ID:         outboxID,
+			dbErr := w.DB.Session(&gorm.Session{}).Create(&models.DLQ{
+				OutboxID:   outboxID,
 				EntityType: indexToEntity(index),
-				EntityID:   uuid.MustParse(docID),
+				EntityID:   docID,
 				Op:         action,
-				Payload:    nil,
+				ErrorMsg:   msg,
+				CreatedAt:  time.Now(),
+				Resolved:   false,
+			}).Error
+			if dbErr != nil {
+				log.Printf("❌ DLQ insert failed: %v", dbErr)
+			} else {
+				log.Printf("💾 DLQ row added for outbox=%d", outboxID)
 			}
-			PutDLQ(w.DB, ob, msg)
-			log.Printf("💀 DLQ created for outbox_id=%d index=%s id=%s reason=%s", outboxID, index, docID, msg)
 		},
 	}
 
-	if len(body) > 0 {
-		item.Body = bytes.NewReader(body)
-	}
+	log.Printf("💾 Adding item to Elasticsearch: %s %s %s", index, action, docID)
 	return bi.Add(context.Background(), item)
 }
 
