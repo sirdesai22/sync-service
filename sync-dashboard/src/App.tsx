@@ -153,12 +153,12 @@ export default function App() {
               <div className="overflow-hidden rounded-lg border border-slate-800">
                 <Table>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-20">ID</TableHead>
-                      <TableHead>Entity</TableHead>
-                      <TableHead>Operation</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="w-40">Created</TableHead>
+                    <TableRow className="text-white">
+                      <TableHead className="w-20 text-white">ID</TableHead>
+                      <TableHead className="text-white">Entity</TableHead>
+                      <TableHead className="text-white">Operation</TableHead>
+                      <TableHead className="text-white">Status</TableHead>
+                      <TableHead className="w-40 text-white">Created</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -170,24 +170,24 @@ export default function App() {
                       const created = item.CreatedAt ?? item.created_at;
                       return (
                         <TableRow key={id}>
-                          <TableCell className="font-medium">{id}</TableCell>
-                          <TableCell className="capitalize">{entity}</TableCell>
+                          <TableCell className="font-medium text-white">{id}</TableCell>
+                          <TableCell className="capitalize text-white">{entity}</TableCell>
                           <TableCell>
-                            <Badge variant="outline">{op}</Badge>
+                            <Badge variant="outline" className="text-white">{op}</Badge>
                           </TableCell>
                           <TableCell>
                             {processed ? (
-                              <Badge variant="secondary">Processed</Badge>
+                              <Badge variant="secondary" className="text-green-700">Processed</Badge>
                             ) : (
-                              <Badge variant="destructive">Pending</Badge>
+                              <Badge variant="destructive" className="text-white">Pending</Badge>
                             )}
                           </TableCell>
-                          <TableCell className="text-xs text-slate-400">
+                          <TableCell className="text-xs text-white">
                             {created ? new Date(created).toLocaleString() : "—"}
                           </TableCell>
                         </TableRow>
-                      );
-                    })}
+                        );
+                      })}
                     {safeOutbox.length === 0 && (
                       <TableRow>
                         <TableCell colSpan={5} className="text-center text-slate-400">
@@ -218,11 +218,11 @@ export default function App() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-16">ID</TableHead>
-                      <TableHead>Entity</TableHead>
-                      <TableHead>Error</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="w-32 text-right">Action</TableHead>
+                      <TableHead className="w-16 text-white">ID</TableHead>
+                      <TableHead className="text-white">Entity</TableHead>
+                      <TableHead className="text-white">Error</TableHead>
+                      <TableHead className="text-white">Status</TableHead>
+                      <TableHead className="w-32 text-right text-white">Action</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -233,8 +233,8 @@ export default function App() {
                       const resolved = item.resolved ?? item.Resolved;
                       return (
                         <TableRow key={id}>
-                          <TableCell className="font-medium">{id}</TableCell>
-                          <TableCell className="capitalize">{entity}</TableCell>
+                          <TableCell className="font-medium text-white">{id}</TableCell>
+                          <TableCell className="capitalize text-white">{entity}</TableCell>
                           <TableCell className="max-w-xs truncate text-xs text-red-300">
                             {error}
                           </TableCell>
@@ -272,7 +272,7 @@ export default function App() {
           </Card>
         </section>
 
-        <footer className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900/40 px-6 py-4 backdrop-blur">
+        {/* <footer className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900/40 px-6 py-4 backdrop-blur">
           <div>
             <p className="text-sm font-medium text-slate-200">
               Observability endpoints
@@ -282,11 +282,11 @@ export default function App() {
             </p>
           </div>
           <Button variant="outline" asChild>
-            <a href="http://localhost:2112/metrics" target="_blank" rel="noreferrer">
+            <a href="/metrics" target="_blank" rel="noreferrer">
               View Prometheus Metrics
             </a>
           </Button>
-        </footer>
+        </footer> */}
       </div>
     </div>
   );
