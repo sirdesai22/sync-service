@@ -51,6 +51,7 @@ type Outbox struct {
 	EntityID   uuid.UUID `gorm:"type:uuid;not null"`
 	Op         string    `gorm:"not null"` // UPSERT | DELETE | REINDEX_...
 	Payload    datatypes.JSON
+	Priority   int       `gorm:"default:0;index:idxpriority"` // 0=user, 1=project, 2=hackathon
 	CreatedAt  time.Time
-	Processed  bool `gorm:"default:false"`
+	Processed  bool `gorm:"default:false;index:idxpriority"`
 }

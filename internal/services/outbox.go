@@ -10,6 +10,19 @@ import (
 	"gorm.io/gorm"
 )
 
+func getPriority(entityType string) int {
+	switch entityType {
+	case "user":
+		return 0 // Highest priority user
+	case "project":
+		return 1 // Medium priority project
+	case "hackathon":
+		return 2 // Lower priority hackathon
+	default:
+		return 99 // Unknown entities last
+	}
+}
+
 // AddOutboxEvent inserts one event into the outbox (same as before)
 func AddOutboxEvent(tx *gorm.DB, entityType string, entityID uuid.UUID, op string, payload any) error {
 	data, _ := json.Marshal(payload)
@@ -18,6 +31,7 @@ func AddOutboxEvent(tx *gorm.DB, entityType string, entityID uuid.UUID, op strin
 		EntityType: entityType,
 		EntityID:   entityID,
 		Op:         op,
+		Priority: getPriority(entityType),
 		Payload:    datatypes.JSON(data),
 	}
 
@@ -36,6 +50,7 @@ func AddBatchOutboxEvents(tx *gorm.DB, entityType string, op string, ids []uuid.
 			EntityType: entityType,
 			EntityID:   id,
 			Op:         op,
+			Priority: getPriority(entityType),
 		}
 		if err := tx.Create(&event).Error; err != nil {
 			log.Printf("❌ Failed to insert batch outbox for %s: %v", entityType, err)
